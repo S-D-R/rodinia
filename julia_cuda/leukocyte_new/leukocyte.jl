@@ -4,8 +4,9 @@ using CUDA
 
 using Printf
 
-# include("../../common/julia/libavi.jl")
-using VideoIO
+using LLVM
+
+include("../../common/julia/libavi.jl")
 
 include("misc_math.jl")
 include("find_ellipse.jl")
@@ -29,20 +30,15 @@ function main(args)
 
     video_file_name = args[2]
 
-    #=
     cell_file = AVI_open_input_file(video_file_name, 1)
 
     if cell_file == C_NULL
         AVI_print_error("Error with AVI_open_input_file")
         exit(1)
     end
-    =#
-
-    #TODO: find the correct values for "target_format" and "transcode"
-    cell_file = VideoIO.openvideo(video_file_name)
 
     # Create precomputed CUDA GICOV constants
-    GICOV_constants = compute_constants()
+    compute_constants()
 
     Iter = 20
     ns = 4
@@ -64,13 +60,13 @@ function main(args)
 
     # Get GICOV matrix corresponding to image gradients
     GICOV_time = Base.@elapsed begin
-        gicov = GICOV(grad_x, grad_y, GICOV_constants)
+        gicov = GICOV(grad_x, grad_y)
     end
 
     # Dilate the GICOV matrix
     dilate_time = Base.@elapsed begin
         strel = structuring_element(12)
-        img_dilated = dilate(gicov, GICOV_constants)
+        img_dilated = dilate(gicov)
     end
 
     # Find possible matches for cell centers based on GICOV and record the
@@ -85,6 +81,7 @@ function main(args)
     crow = crow[sortedy]
     ccol = ccol[sortedy]
 
+    println(typeof(gicov))
     GICOV_spots = [sqrt(gicov[crow[i]+1,ccol[i]+1]) for i in 1:size(crow,1)]
 
     result_indices = findall((crow .> 26) .& (crow .< BOTTOM - TOP + 39))
@@ -100,10 +97,8 @@ function main(args)
     celly = [y_result[i] + radius * sin(t[j]) for i in 1:size(x_result,1), j in 1:36]
 
     A = TMatrix(9,4)
-    #cell_width = AVI_video_width(cell_file)
-    #cell_height = AVI_video_height(cell_file)
-    cell_width = cell_file.width
-    cell_height = cell_file.height
+    cell_width = AVI_video_width(cell_file)
+    cell_height = AVI_video_height(cell_file)
 
     V = zeros(Float64,size(x_result,1))
     QAX_CENTERS = zeros(Float64,size(x_result,1))
@@ -196,10 +191,19 @@ function main(args)
 end
 
 
+LLVM.clopts("--unroll-threshold=1300")
+
+#TODO: use VideoIO for reading AVI?
 if abspath(PROGRAM_FILE) == @__FILE__
     println(ARGS)
     main(ARGS)
 
+    # main(ARGS)
+
+    GC.gc(true)
+    CUDA.@profile CUDA.NVTX.@range "host" main(ARGS)
+    
+    #=
     if haskey(ENV, "PROFILE")
         # warm up
         for i in 1:5
@@ -218,4 +222,5 @@ if abspath(PROGRAM_FILE) == @__FILE__
         end
         CUDA.@profile CUDA.NVTX.@range "host" main(ARGS)   # measure execution time
     end
+    =#
 end

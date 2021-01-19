@@ -19,12 +19,9 @@ const NCIRCLES = 7
 #  (hardcoded to the boundaries of the blood vessel in the test video)
 # If scaled == true, all values are scaled to the range [0.0, 1.0]
 function get_frame(cell_file, frame_num, cropped::Bool, scaled::Bool)
-    #width = AVI_video_width(cell_file)
-    #height = AVI_video_height(cell_file)
-    width = cell_file.width
-    height = cell_file.height
+    width = AVI_video_width(cell_file)
+    height = AVI_video_height(cell_file)
 
-    #=
     AVI_set_video_position(cell_file, frame_num)
 
     image_buf = Matrix{UInt8}(undef, (width,height))
@@ -34,12 +31,6 @@ function get_frame(cell_file, frame_num, cropped::Bool, scaled::Bool)
         AVI_print_error("Error with AVI_read_frame")
         exit(1)
     end
-    =#
-
-    seekstart(cell_file)
-    skipframes(cell_file, frame_num)
-
-    image_buf = reinterpret(UInt8, read(cell_file))
 
     # convert from row-major to column-major
     image_buf = image_buf'
@@ -87,9 +78,9 @@ end
 
 # Given x- and y-gradients of a video frame, computes the GICOV
 #  score for each sample ellipse at every pixel in the frame
-function GICOV(grad_x, grad_y, GICOV_constants)
+function GICOV(grad_x, grad_y)
     # Offload the GICOV score computation to the GPU
-    gicov = GICOV_CUDA(grad_x,grad_y,GICOV_constants)
+    gicov = GICOV_CUDA(grad_x,grad_y)
 
     convert(Array{Float64,2},gicov)
 end
@@ -103,9 +94,9 @@ end
 
 
 # Performs an image dilation on the specified matrix
-function dilate(img_in, GICOV_constants)
+function dilate(img_in)
     # Offload the dilation to the GPU
-    dilate_CUDA(img_in,GICOV_constants)
+    dilate_CUDA(img_in)
 end
 
 
@@ -233,6 +224,10 @@ end
 # Performs bilinear interpolation, getting the values of m specified in the
 # vectors X and Y
 function linear_interp2(m, X, Y)
+    if length(X) != length(Y)
+        # NOTE: without this if check, running main() more than 2 times causes BoundsErrors (????)
+        println("NOT SAME LENGTH")
+    end
     # Kind of assumes X and Y have same len!
     retval = Matrix{Float64}(undef, (1,length(X)))
 
